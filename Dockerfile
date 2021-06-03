@@ -10,7 +10,7 @@ ENV APP_HOME /app
 WORKDIR $APP_HOME
 COPY . ./
 
-ENV NAME Martin
+ENV NAME Viewer
 
 # Install production dependencies.
 RUN pip install Flask gunicorn
