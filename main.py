@@ -1,14 +1,18 @@
 import os
-
 from flask import Flask
+from spanner import Spanner
 
 app = Flask(__name__)
 
 
-@app.route("/")
-def hello_world():
-    name = os.environ.get("NAME", "World")
-    return "Hello {}!".format(name)
+INPUT_BUCKET_NAME = "voices-bot-audio-files"
+
+
+@app.route("/ingest")
+def ingest():
+    spanner = Spanner()
+    spanner.ingest({"gcp": {"bucket": INPUT_BUCKET_NAME}})
+    return {"status": "ok"}
 
 
 if __name__ == "__main__":
