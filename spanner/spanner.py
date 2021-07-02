@@ -1,14 +1,10 @@
 from google.cloud import storage
 from functools import reduce
-from typing import Optional
-
-
-def pipeline(*steps):
-    return reduce(lambda x, y: y(x), list(steps))
+from typing import Optional, List, Iterator, Iterable
 
 
 class Span:
-    # id 
+    # id
     layer: str
     app: str
     author: str
@@ -45,35 +41,52 @@ class Spanner:
                 yield blob.name
 
 
-def load():
-    """ Go to google cloud, fetch data and turn it into spans
+class PipelineStep:
+    def __init__(self, **kwargs):
+        self._params = kwargs
+
+
+def chain(steps: List[PipelineStep]) -> Iterable[Span]:
+    return reduce(lambda x, y: y(x), steps)
+
+
+class Load(PipelineStep):
+    """ Generating the data rather than processing, Load is an
+        iterable
 
     """
-    data = ['lol', 'who', 'dis']
+    def __iter__(self) -> Iterator[Span]:
+        """Go to google cloud, fetch data and turn it into spans"""
+        data = ["lol", "who", "dis"]
 
-    for d in data:
-        yield d
+        for d in data:
+            yield d
 
-def cache(spans):
-    """ If cache exists, return cached spans. If not, read the incoming spans
+
+class Cache(PipelineStep):
+    _cache = None
+
+    def __call__(self, spans):
+        """If cache exists, return cached spans. If not, read the incoming spans
         and cache them before returning.
 
-    """
-    #TODO store cache in a blob
-    _cache = ['a']
+        """
+        # TODO store cache in a blob
+        if self._params.get("backend") == "file":
+            self._cache = ["a"]
 
-    if _cache:
-        yield from _cache
+        if self._cache:
+            yield from self._cache
 
-    else:
-        yield from spans
+        else:
+            yield from spans
 
-        
+
 if __name__ == "__main__":
-    # voices = cache(load())
-    voices = pipeline(load, cache)
-
-    voices2 = load()
-
-    print(list(voices))
-    print(list(voices2))
+    pipeline = chain(
+        [
+            Load(storage={"gcp": {"bucket": "a"}, "suffix": ".oga"}),
+            Cache(backend="file"),
+        ]
+    )
+    print(list(pipeline))
