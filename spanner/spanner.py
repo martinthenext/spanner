@@ -16,7 +16,11 @@ class Span:
     start: int
 
     # data
-    content: str
+    content: str  # text for plaintext, URI for everything else
+
+    def __init__(self, **kwargs):
+        for k, v in kwargs.items():
+            setattr(self, k, v)
 
 
 class Spanner:
@@ -85,7 +89,12 @@ class Load(PipelineStep):
             for filename in os.listdir(storage_dir):
                 if filename.endswith(suffix):
                     ts, app, author, context = metadata_func(filename)
-                    yield filename
+                    # TODO add data reference to "content" 
+                    yield {
+                        self._layer: Span(
+                            app=app, author=author, context=context, start=ts
+                        )
+                    }
 
 
 class Convert(PipelineStep):
