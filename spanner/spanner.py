@@ -22,6 +22,9 @@ class Span:
         for k, v in kwargs.items():
             setattr(self, k, v)
 
+    def __repr__(self):
+        return str(self.__dict__)
+
 
 class Spanner:
     def __init__(self):
@@ -89,10 +92,15 @@ class Load(PipelineStep):
             for filename in os.listdir(storage_dir):
                 if filename.endswith(suffix):
                     ts, app, author, context = metadata_func(filename)
-                    # TODO add data reference to "content" 
+                    content_uri = f"file://{storage_dir}/{filename}"
+
                     yield {
                         self._layer: Span(
-                            app=app, author=author, context=context, start=ts
+                            app=app,
+                            author=author,
+                            context=context,
+                            start=ts,
+                            content=content_uri,
                         )
                     }
 
