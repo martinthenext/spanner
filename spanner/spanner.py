@@ -1,11 +1,15 @@
+import os
+from datetime import datetime
 from google.cloud import storage
 from functools import reduce
 from typing import Optional, List, Iterator, Iterable
 
 
+STORAGE_DIR = "/Users/martin/voices-bot-data/voices-bot-data-new"
+
+
 class Span:
     # id
-    layer: str
     app: str
     author: str
     context: str
@@ -42,29 +46,75 @@ class Spanner:
 
 
 class PipelineStep:
-    def __init__(self, **kwargs):
-        self._params = kwargs
+    pass
 
 
 def chain(steps: List[PipelineStep]) -> Iterable[Span]:
     return reduce(lambda x, y: y(x), steps)
 
 
+def get_timestamp_app_author_context(filename):
+    app = "telegram"
+    parts = filename.split("-")
+    ts = datetime.strptime("-".join(parts[:3]), "%Y-%m-%d_%H:%M:%S.%f")
+    author = parts[3]
+    context = parts[4] if parts[4] else "-" + parts[5]
+    return ts, app, author, context
+
+
 class Load(PipelineStep):
-    """ Generating the data rather than processing, Load is an
-        iterable
+    """Generating the data rather than processing, Load is an
+    iterable
 
     """
+
+    _layer = None
+    _storage = None
+
+    def __init__(self, layer, storage):
+        self._layer = layer
+        self._storage = storage
+
     def __iter__(self) -> Iterator[Span]:
         """Go to google cloud, fetch data and turn it into spans"""
-        data = ["lol", "who", "dis"]
+        if "local" in self._storage:
+            storage_dir = self._storage["local"]
+            suffix = self._storage.get("suffix", "ogg")
+            metadata_func = self._storage.get("metadata_func")
 
-        for d in data:
-            yield d
+            for filename in os.listdir(storage_dir):
+                if filename.endswith(suffix):
+                    ts, app, author, context = metadata_func(filename)
+                    yield filename
+
+
+class Convert(PipelineStep):
+    """Convert data from one modality to another one using an
+    external API
+
+    """
+
+    input_layer: str
+    output_layer: str
+    api: str
+
+    def __init__(self, input_layer, output_layer, api):
+        self.input_layer = input_layer
+        self.output_layer = output_layer
+        self.api = api
+
+    def __call__(self, spans):
+        yield from spans
 
 
 class Cache(PipelineStep):
     _cache = None
+    _layer = None
+    _backend = None
+
+    def __init__(self, layer, backend):
+        self._layer = layer
+        self._backend = backend
 
     def __call__(self, spans):
         """If cache exists, return cached spans. If not, read the incoming spans
@@ -72,7 +122,7 @@ class Cache(PipelineStep):
 
         """
         # TODO store cache in a blob
-        if self._params.get("backend") == "file":
+        if self._backend == "file":
             self._cache = ["a"]
 
         if self._cache:
@@ -85,8 +135,16 @@ class Cache(PipelineStep):
 if __name__ == "__main__":
     pipeline = chain(
         [
-            Load(storage={"gcp": {"bucket": "a"}, "suffix": ".oga"}),
-            Cache(backend="file"),
+            Load(
+                "voice",
+                storage={
+                    "local": STORAGE_DIR,
+                    "suffix": ".oga",
+                    "metadata_func": get_timestamp_app_author_context,
+                },
+            ),
+            Convert("voice", "plaintext", "gcp-speech-to-text"),
+            Cache("plaintext", backend="none"),
         ]
     )
     print(list(pipeline))
