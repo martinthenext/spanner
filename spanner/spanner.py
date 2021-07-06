@@ -2,7 +2,6 @@ import os
 import json
 from abc import ABC
 from datetime import datetime, timedelta
-from google.cloud import storage
 from functools import reduce
 from typing import Optional, List, Iterator, Iterable
 

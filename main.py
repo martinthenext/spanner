@@ -9,23 +9,9 @@ INPUT_BUCKET = "voices-bot-audio-files"
 APP_NAME = "voices-bot"
 
 
-def voices_bot_get_user_id(filename):
-    return filename.split("-")[-3]
-
-
-def voices_bot_get_group_id(filename):
-    return filename.split("-")[-2]
-
-
 @app.route("/ingest")
 def ingest():
-    #voices = sp.ingest(
-    #    "voice",
-    #    {"gcp": {"bucket": INPUT_BUCKET}, "suffix": ".oga"},
-    #    app=APP_NAME,
-    #    context=voices_bot_get_group_id,
-    #    author=voices_bot_get_user_id,
-    #)
+    #TODO Read data from GCP and run spanner on it
     
     return {"status": "ok"}
 
