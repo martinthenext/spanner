@@ -1,11 +1,14 @@
 import os
-from datetime import datetime
+import json
+from abc import ABC
+from datetime import datetime, timedelta
 from google.cloud import storage
 from functools import reduce
 from typing import Optional, List, Iterator, Iterable
 
 
 STORAGE_DIR = "/Users/martin/voices-bot-data/voices-bot-data-new"
+TS_FORMAT = "%Y-%m-%d_%H:%M:%S.%f"
 
 
 class Span:
@@ -13,10 +16,13 @@ class Span:
     app: str
     author: str
     context: str
-    start: int
+    start: datetime
 
     # data
     content: str  # text for plaintext, URI for everything else
+
+    # optional
+    end: datetime
 
     def __init__(self, **kwargs):
         for k, v in kwargs.items():
@@ -26,47 +32,34 @@ class Span:
         return str(self.__dict__)
 
 
-class Spanner:
-    def __init__(self):
-        pass
+class PipelineStep(ABC):
+    """Pipeline steps get inialized with input data source and act as
+    iterators. On each iteration they will read input, perform
+    computation on it and yield results.
 
-    def ingest(
-        self, layer: str, source: dict = {}, app=None, context=None, author=None
-    ):
-        """Ingest spans from a given source
+    """
 
-        Args:
-            layer (str): layer to ingest into
-            source (dict): source connection details
-            app: a string or a function to infer it from name
-            context: a string or a function to infer it from name
-
-        """
-        if "gcp" in source:
-            bucket = source["gcp"]["bucket"]
-
-            storage_client = storage.Client()
-            blobs = storage_client.list_blobs(bucket)
-
-            for blob in blobs:
-                yield blob.name
-
-
-class PipelineStep:
     pass
 
 
-def chain(steps: List[PipelineStep]) -> Iterable[Span]:
+def chain(steps: List[PipelineStep]) -> Iterable[dict]:
     return reduce(lambda x, y: y(x), steps)
 
 
 def get_timestamp_app_author_context(filename):
     app = "telegram"
     parts = filename.split("-")
-    ts = datetime.strptime("-".join(parts[:3]), "%Y-%m-%d_%H:%M:%S.%f")
+    ts = datetime.strptime("-".join(parts[:3]), TS_FORMAT)
     author = parts[3]
     context = parts[4] if parts[4] else "-" + parts[5]
     return ts, app, author, context
+
+
+def get_json_filename_prefix(timestamp, context, author):
+    ts_str = timestamp.strftime(TS_FORMAT)
+    prefix = f"{ts_str}-{author}-{context}"
+
+    return prefix
 
 
 class Load(PipelineStep):
@@ -120,33 +113,105 @@ class Convert(PipelineStep):
         self.output_layer = output_layer
         self.api = api
 
-    def __call__(self, spans):
-        yield from spans
+    def __call__(self, spans) -> Iterable[dict[str, Span]]:
+        """Call the external API to compute possibly multiple converted
+        spans for each input spans
+        """
+        for span in spans:
+            raise NotImplementedError(
+                "External API is not available, please " "use cache instead"
+            )
 
 
-class Cache(PipelineStep):
-    _cache = None
-    _layer = None
-    _backend = None
+class Cache:
+    """Cache the given Convert step. Process spans from the input layer:
 
-    def __init__(self, layer, backend):
-        self._layer = layer
-        self._backend = backend
+        - If converted spans are available in the cache, yield them
+        - Otherwise, yield converted spans from the Convert step
 
-    def __call__(self, spans):
-        """If cache exists, return cached spans. If not, read the incoming spans
-        and cache them before returning.
+    If storage is local, and format is "gcp-speech-api-response",
+    it will look for a standard GCP response JSON for a given input
+    layer span under the filename produced by the <get_json_filename_prefix>
+    function.
+
+    """
+
+    _storage = None
+    _convert_step = None
+
+    def __init__(self, convert_step: PipelineStep, storage: dict):
+        self._storage = storage
+        self._convert_step = convert_step
+
+    def __call__(self, layered_spans: Iterable[dict[str, Span]]):
+        storage_dir = self._storage.get("local")
+        filename_func = self._storage.get("filename_func")
+
+        for layered_span in layered_spans:
+            input_span = layered_span[self._convert_step.input_layer]
+            filename_prefix = filename_func(
+                input_span.start, input_span.context, input_span.author
+            )
+            filenames = [
+                f
+                for f in os.listdir(storage_dir)
+                if f.startswith(filename_prefix) and f.endswith(".json")
+            ]
+            filename = filenames.pop() if filenames else None
+
+            if filename:
+                # cache found for this input span, return it
+                path = os.path.join(storage_dir, filename)
+                output_spans = self.get_cashed_output_spans(path, input_span)
+
+                # layer output spans on top of the existing input
+                layered_spans = (
+                    {self._convert_step.output_layer: output_span, **layered_span}
+                    for output_span in output_spans
+                )
+
+                yield from layered_spans
+            else:
+
+                # cache not found for this span, call the convert
+                yield from self._convert_step(input_span)
+
+    def get_cashed_output_spans(self, output_spans_path, input_span):
+        """Given the input span, get corresponding output spans
+        from the path and yield layered spans.
 
         """
-        # TODO store cache in a blob
-        if self._backend == "file":
-            self._cache = ["a"]
+        if self._storage.get("format") != "gcp-speech-api-response":
+            raise NotImplementedError(
+                "Only caching GCP Speech API " "response JSONs is implemented"
+            )
 
-        if self._cache:
-            yield from self._cache
+        with open(output_spans_path) as f:
+            output_spans = json.load(f)
 
-        else:
-            yield from spans
+        result = next(iter(output_spans.get("results", [])), {})
+        alternative = next(iter(result.get("alternatives", [])), {})
+
+        confidence = alternative.get("confidence")
+        for word in alternative.get("words", []):
+            output_span_content = word["word"]
+
+            start_seconds = float(word["startTime"].replace("s", ""))
+            output_span_start = input_span.start + timedelta(seconds=start_seconds)
+
+            end_seconds = float(word["endTime"].replace("s", ""))
+            output_span_end = input_span.start + timedelta(seconds=end_seconds)
+
+            output_span = Span(
+                app=input_span.app,
+                author=input_span.author,
+                context=input_span.context,
+                start=output_span_start,
+                end=output_span_end,
+                content=output_span_content,
+            )
+
+            yield output_span
 
 
 if __name__ == "__main__":
@@ -160,8 +225,14 @@ if __name__ == "__main__":
                     "metadata_func": get_timestamp_app_author_context,
                 },
             ),
-            Convert("voice", "plaintext", "gcp-speech-to-text"),
-            Cache("plaintext", backend="none"),
+            Cache(
+                Convert("voice", "plaintext", "gcp-speech-to-text"),
+                storage={
+                    "local": STORAGE_DIR,
+                    "format": "gcp-speech-api-response",
+                    "filename_func": get_json_filename_prefix,
+                },
+            ),
         ]
     )
-    print(list(pipeline))
+    print(list(pipeline)[-3:])
