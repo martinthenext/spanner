@@ -4,7 +4,7 @@ import pprint
 from abc import ABC
 from datetime import datetime, timedelta
 from functools import reduce
-from typing import Optional, List, Iterator, Iterable
+from typing import Optional, List, Iterator, Iterable, Callable
 
 
 STORAGE_DIR = "/Users/martin/voices-bot-data/voices-bot-data-new"
@@ -223,6 +223,47 @@ class Cache:
             yield output_span
 
 
+class AggTextMatch(PipelineStep):
+    """ Find a string in a plaintext layer.
+    """
+    _layer: str
+    _query: str
+
+    def __init__(self, layer, query):
+        self._layer = layer
+        self._query = query.lower()
+
+    def __call__(
+        self, layered_spans: Iterable[dict[str, Span]]
+    ) -> Iterable[dict[str, Span]]:
+        acc_str, acc_list = "", []
+
+        for layered_span in layered_spans:
+            text = layered_span[self._layer].content.lower()
+            acc_str += text + " "
+            acc_list.append(layered_span)
+
+            if self._query in acc_str:
+                selected_spans = (ls for ls in acc_list
+                    if ls[self._layer].content.lower() in self._query)
+                yield from selected_spans
+
+                acc_str, acc_list = "", []
+
+
+class Filter(PipelineStep):
+    _func: Callable[dict[str, Span], bool]
+
+    def __init__(self, func):
+        self._func = func
+
+    def __call__(
+        self, layered_spans: Iterable[dict[str, Span]]
+    ) -> Iterable[dict[str, Span]]:
+        #TODO
+        pass
+
+
 if __name__ == "__main__":
     pipeline = chain(
         [
@@ -242,9 +283,14 @@ if __name__ == "__main__":
                     "filename_func": get_json_filename_prefix,
                 },
             ),
+            AggTextMatch(
+                "plaintext",
+                "too noisy",
+            ),
         ]
     )
 
     pipeline_computed = list(pipeline)
+    pipeline_computed = [x["plaintext"].content for x in pipeline_computed]
     pp = pprint.PrettyPrinter(indent=2)
     pp.pprint(pipeline_computed[-3:])
