@@ -1,5 +1,6 @@
 import os
 import json
+import pprint
 from abc import ABC
 from datetime import datetime, timedelta
 from functools import reduce
@@ -21,7 +22,7 @@ class Span:
     content: str  # text for plaintext, URI for everything else
 
     # optional
-    end: datetime
+    end: Optional[datetime]
 
     def __init__(self, **kwargs):
         for k, v in kwargs.items():
@@ -36,9 +37,16 @@ class PipelineStep(ABC):
     iterators. On each iteration they will read input, perform
     computation on it and yield results.
 
+    Steps both consume and produce iterables of so layered spans:
+
+    [ { layer1: Span(...), layer2: Span(...) }, ... ]
+
     """
 
-    pass
+    def __call__(
+        self, layered_spans: Iterable[dict[str, Span]]
+    ) -> Iterable[dict[str, Span]]:
+        pass
 
 
 def chain(steps: List[PipelineStep]) -> Iterable[dict]:
@@ -142,7 +150,9 @@ class Cache:
         self._storage = storage
         self._convert_step = convert_step
 
-    def __call__(self, layered_spans: Iterable[dict[str, Span]]):
+    def __call__(
+        self, layered_spans: Iterable[dict[str, Span]]
+    ) -> Iterable[dict[str, Span]]:
         storage_dir = self._storage.get("local")
         filename_func = self._storage.get("filename_func")
 
@@ -234,4 +244,7 @@ if __name__ == "__main__":
             ),
         ]
     )
-    print(list(pipeline)[-3:])
+
+    pipeline_computed = list(pipeline)
+    pp = pprint.PrettyPrinter(indent=2)
+    pp.pprint(pipeline_computed[-3:])
