@@ -93,7 +93,7 @@ def merge_spans(sorted_f_list, window_ms=500):
             accumulator['end'] = e1
             new_span = Span(**accumulator)
             merged_span_list.append({'text': new_span, 'voice': new_span})
-            accumulator = {'start': sorted_f_list[idx]['text'].start, "content": ""}
+            accumulator = {'start': sorted_f_list[idx+1]['text'].start, "content": ""}
 
     # append the final span
     accumulator['content'] += " " + sorted_f_list[-1]['text'].content
