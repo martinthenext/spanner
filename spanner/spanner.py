@@ -31,6 +31,17 @@ class Span:
     def __repr__(self):
         return str(self.__dict__)
 
+    def __eq__(self, other):
+        if not isinstance(other, Span):
+            return False
+
+        return (
+            self.app == other.app
+            and self.author == other.author
+            and self.context == other.context
+            and self.start == other.start
+        )
+
 
 class PipelineStep(ABC):
     """Pipeline steps get inialized with input data source and act as
@@ -275,10 +286,10 @@ class Expand(PipelineStep):
     _start_diff: timedelta
     _end_diff: timedelta
 
-    def __init__(self, layer: str, secs_before_start: float, secs_after_end: float):
+    def __init__(self, layer: str, sec_before: float, sec_after: float):
         self._layer = layer
-        self._start_diff = timedelta(seconds=secs_before_start)
-        self._end_diff = timedelta(seconds=secs_after_end)
+        self._start_diff = timedelta(seconds=sec_before)
+        self._end_diff = timedelta(seconds=sec_after)
 
     def __call__(
         self, layered_spans: Iterable[dict[str, Span]]
@@ -294,6 +305,56 @@ class Expand(PipelineStep):
                 content=None,
             )
             yield ls
+
+
+class CutAudio(PipelineStep):
+    """Cut audio contained in spans of the audio layer using spans
+    of time taken from the cut layer. If cut layer spans intersect,
+    merge them.
+
+    This assumes that the cut layer spans are clustered by the audio
+    spans, i.e. once you see a new audio span, you have seen all the
+    cut spans attributed to it.
+
+    """
+
+    _audio_layer: str
+    _cut_layer: str
+
+    def __init__(self, audio_layer: str, by: str):
+        self._audio_layer = audio_layer
+        self._cut_layer = by
+
+    def merge_cut_spans(self, cut_spans: List[Span]):
+        # TODO
+        return cut_spans
+
+    def cut_audio(self, audio_span: Span, cut_spans: List[Span]):
+        # TODO
+        new_audio_file_uri = ""
+        return new_audio_file_uri
+
+    def __call__(
+        self, layered_spans: Iterable[dict[str, Span]]
+    ) -> Iterable[dict[str, Span]]:
+
+        current_audio_span = None
+        acc_cut_spans = []
+
+        for lp in layered_spans:
+            if current_audio_span != lp[self._audio_layer]:
+                # new audio span found - process the last one
+                # using the accumulated cut spans
+                cut_spans = self.merge_cut_spans(acc_cut_spans)
+                audio = self.cut_audio(current_audio_span, cut_spans)
+                yield audio
+
+                # replace the current audio span
+                current_audio_span = lp[self._audio_layer]
+                acc_cut_spans.append(lp[self._cut_layer])
+
+            else:
+                acc_cut_spans.append(lp[self._cut_layer])
 
 
 if __name__ == "__main__":
@@ -323,7 +384,10 @@ if __name__ == "__main__":
                 "plaintext",
                 QUERY,
             ),
-            Expand("plaintext", 0.3, 0.2),
+            Expand("plaintext", sec_before=0.3, sec_after=0.2),
+            # at this point, "plaintext" spans are still clustered by "voice"
+            # spans and, hence, by context
+            CutAudio("voice", by="plaintext"),
         ]
     )
 
