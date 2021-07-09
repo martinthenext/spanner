@@ -260,11 +260,15 @@ class Filter(PipelineStep):
     def __call__(
         self, layered_spans: Iterable[dict[str, Span]]
     ) -> Iterable[dict[str, Span]]:
-        #TODO
-        pass
+        for ls in layered_spans:
+            if self._func(ls):
+                yield ls
 
 
 if __name__ == "__main__":
+    QUERY = "hey martin"
+    CONTEXTS = ["-595881151"]
+
     pipeline = chain(
         [
             Load(
@@ -283,14 +287,17 @@ if __name__ == "__main__":
                     "filename_func": get_json_filename_prefix,
                 },
             ),
+            Filter(
+                lambda sp: sp["voice"].context in CONTEXTS
+            ),
             AggTextMatch(
                 "plaintext",
-                "too noisy",
+                QUERY,
             ),
         ]
     )
 
     pipeline_computed = list(pipeline)
-    pipeline_computed = [x["plaintext"].content for x in pipeline_computed]
+    #pipeline_computed = [x["plaintext"].content for x in pipeline_computed]
     pp = pprint.PrettyPrinter(indent=2)
     pp.pprint(pipeline_computed[-3:])
