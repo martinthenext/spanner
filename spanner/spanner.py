@@ -224,8 +224,8 @@ class Cache:
 
 
 class AggTextMatch(PipelineStep):
-    """ Find a string in a plaintext layer.
-    """
+    """Find a string in a plaintext layer."""
+
     _layer: str
     _query: str
 
@@ -244,8 +244,11 @@ class AggTextMatch(PipelineStep):
             acc_list.append(layered_span)
 
             if self._query in acc_str:
-                selected_spans = (ls for ls in acc_list
-                    if ls[self._layer].content.lower() in self._query)
+                selected_spans = (
+                    ls
+                    for ls in acc_list
+                    if ls[self._layer].content.lower() in self._query
+                )
                 yield from selected_spans
 
                 acc_str, acc_list = "", []
@@ -265,6 +268,34 @@ class Filter(PipelineStep):
                 yield ls
 
 
+class Expand(PipelineStep):
+    """Expand (start, end) span boundaries for a given layer"""
+
+    _layer: str
+    _start_diff: timedelta
+    _end_diff: timedelta
+
+    def __init__(self, layer: str, secs_before_start: float, secs_after_end: float):
+        self._layer = layer
+        self._start_diff = timedelta(seconds=secs_before_start)
+        self._end_diff = timedelta(seconds=secs_after_end)
+
+    def __call__(
+        self, layered_spans: Iterable[dict[str, Span]]
+    ) -> Iterable[dict[str, Span]]:
+        for ls in layered_spans:
+            ls[self._layer] = Span(
+                start=ls[self._layer].start - self._start_diff,
+                end=ls[self._layer].end + self._end_diff,
+                app=ls[self._layer].app,
+                author=ls[self._layer].author,
+                context=ls[self._layer].context,
+                # clear out the content
+                content=None,
+            )
+            yield ls
+
+
 if __name__ == "__main__":
     QUERY = "hey martin"
     CONTEXTS = ["-595881151"]
@@ -279,6 +310,7 @@ if __name__ == "__main__":
                     "metadata_func": get_timestamp_app_author_context,
                 },
             ),
+            Filter(lambda sp: sp["voice"].context in CONTEXTS),
             Cache(
                 Convert("voice", "plaintext", "gcp-speech-to-text"),
                 storage={
@@ -287,17 +319,15 @@ if __name__ == "__main__":
                     "filename_func": get_json_filename_prefix,
                 },
             ),
-            Filter(
-                lambda sp: sp["voice"].context in CONTEXTS
-            ),
             AggTextMatch(
                 "plaintext",
                 QUERY,
             ),
+            Expand("plaintext", 0.3, 0.2),
         ]
     )
 
     pipeline_computed = list(pipeline)
-    #pipeline_computed = [x["plaintext"].content for x in pipeline_computed]
+    # pipeline_computed = [x["plaintext"].content for x in pipeline_computed]
     pp = pprint.PrettyPrinter(indent=2)
     pp.pprint(pipeline_computed[-3:])
