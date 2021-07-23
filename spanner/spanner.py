@@ -307,7 +307,7 @@ class Expand(PipelineStep):
             yield ls
 
 
-class CutAudio(PipelineStep):
+class SelectCutAudio(PipelineStep):
     """Cut audio contained in spans of the audio layer using spans
     of time taken from the cut layer. If cut layer spans intersect,
     merge them.
@@ -326,12 +326,11 @@ class CutAudio(PipelineStep):
         self._cut_layer = by
 
     def merge_cut_spans(self, cut_spans: List[Span]):
-        # TODO
         return cut_spans
 
     def cut_audio(self, audio_span: Span, cut_spans: List[Span]):
         # TODO
-        new_audio_file_uri = ""
+        new_audio_file_uri = audio_span.content
         return new_audio_file_uri
 
     def __call__(
@@ -342,19 +341,26 @@ class CutAudio(PipelineStep):
         acc_cut_spans = []
 
         for lp in layered_spans:
-            if current_audio_span != lp[self._audio_layer]:
-                # new audio span found - process the last one
-                # using the accumulated cut spans
+            if current_audio_span == lp[self._audio_layer]:
+                # record a new cut span for the current audio
+                acc_cut_spans.append(lp[self._cut_layer])
+                continue
+
+            # new audio span detected
+            # if there was a previous audio, cut it with accumulated cut spans
+            if current_audio_span is not None:
                 cut_spans = self.merge_cut_spans(acc_cut_spans)
                 audio = self.cut_audio(current_audio_span, cut_spans)
                 yield audio
 
-                # replace the current audio span
-                current_audio_span = lp[self._audio_layer]
-                acc_cut_spans.append(lp[self._cut_layer])
+            # change the current span
+            current_audio_span = lp[self._audio_layer]
+            acc_cut_spans = [lp[self._cut_layer]]
 
-            else:
-                acc_cut_spans.append(lp[self._cut_layer])
+        # ran out of spans, cut the last audio
+        cut_spans = self.merge_cut_spans(acc_cut_spans)
+        audio = self.cut_audio(current_audio_span, cut_spans)
+        yield audio
 
 
 if __name__ == "__main__":
@@ -387,7 +393,7 @@ if __name__ == "__main__":
             Expand("plaintext", sec_before=0.3, sec_after=0.2),
             # at this point, "plaintext" spans are still clustered by "voice"
             # spans and, hence, by context
-            CutAudio("voice", by="plaintext"),
+            SelectCutAudio("voice", by="plaintext"),
         ]
     )
 
